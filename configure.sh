@@ -9,7 +9,7 @@ git submodule update --init --recursive
 
 cd tt-xla
 
-pushd third_party/tt_forge_modules
+pushd third_party/tt_forge_models
 git checkout $1
 popd
 

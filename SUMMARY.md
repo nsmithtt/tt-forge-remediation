@@ -1,41 +1,47 @@
-# Remediation Summary: anubis_mini_8b_v1_i1_gguf/causal_lm/pytorch-ANUBIS_MINI_8B_V1_I1_Q4_K_M_GGUF-single_device-inference
+# Silicon Pass: bartowski_thedrummer_cydonia_24b_v2_gguf
 
 ## Test
 
 ```
-tests/runner/test_models.py::test_all_models_torch[anubis_mini_8b_v1_i1_gguf/causal_lm/pytorch-ANUBIS_MINI_8B_V1_I1_Q4_K_M_GGUF-single_device-inference]
+tests/runner/test_models.py::test_all_models_torch[bartowski_thedrummer_cydonia_24b_v2_gguf/causal_lm/pytorch-24B_V2_GGUF-single_device-inference]
 ```
 
-## Status: SILICON_PASS
+## Status: SILICON_PASS (530s)
 
 ## Root Cause
 
-Multiple issues were present in the anubis_mini_8b_v1_i1_gguf model loader:
+Four issues were present in the bartowski_thedrummer_cydonia_24b_v2_gguf model loader:
 
-1. **Missing `gguf` dependency** — The `requirements.txt` for this model did not list `gguf>=0.10.0`, causing import failures at runtime.
+1. **Missing `gguf` dependency** — No `requirements.txt` for this model; `gguf>=0.10.0` is required for GGUF loading.
 
-2. **GGUF version detection broken with transformers 5.x** — `transformers` caches `PACKAGE_DISTRIBUTION_MAPPING` at import time. When `gguf` is installed later (by `RequirementsManager`), the mapping is stale and version detection returns `'N/A'`, crashing `packaging.version.parse`. Fixed by patching `PACKAGE_DISTRIBUTION_MAPPING` with `gguf` and clearing the `is_gguf_available` cache.
+2. **GGUF version detection broken with transformers 5.x** — `transformers` caches `PACKAGE_DISTRIBUTION_MAPPING` at import time. When `gguf` is installed later by `RequirementsManager`, the mapping is stale and version detection returns `'N/A'`, crashing `packaging.version.parse`.
 
-3. **`load_gguf_checkpoint` patch incompatibility with `model_to_load` kwarg** — A newer version of `transformers` added a `model_to_load` keyword argument to `load_gguf_checkpoint`. The GGUF model loader patched this function but did not accept/forward the new kwarg, causing:
-
+3. **`load_gguf_checkpoint` patch incompatibility with `model_to_load` kwarg** — `transformers` 5.x added a `model_to_load` keyword argument to `load_gguf_checkpoint` but the loader's wrapper didn't accept it:
    ```
    TypeError: _patched_load_gguf_checkpoint() got an unexpected keyword argument 'model_to_load'
    ```
 
+4. **`apply_chat_template` fails — no chat template set** — The tokenizer loaded from the GGUF file has no `chat_template`, so `apply_chat_template()` raises:
+   ```
+   ValueError: Cannot use chat template functions because tokenizer.chat_template is not set
+   ```
+
+5. **OOM during inference** — The Cydonia 24B model (hidden_size=5120, intermediate_size=32768, 40 layers, vocab_size=131072) nearly fills the 4 GB DRAM per bank when loaded in bfloat16. During inference, `ttnn::tilize` needs to create a tiled copy of the FFN gate_proj weight (5120×32768×2 = 320 MB total / 40 MB per bank), but only ~73 MB free per bank remains (largest contiguous block 35 MB):
+   ```
+   TT_FATAL: Out of Memory: Not enough space to allocate 335544320 B DRAM buffer across 8 banks,
+   where each bank needs to store 41943040 B, but bank size is 4273390016 B
+   (allocated: 4196976832 B, free: 76413184 B, largest free block: 37030336 B)
+   ```
+
 ## Fix
 
-All three issues were fixed in the `tt_forge_models` branch `arch-c-36-tt-xla-dev/nsmith/2026-04-22_16-58/hf-bringup-9`:
+All fixes are in `tt_forge_models` branch `remediation/cydonia-24b-v2-gguf-fix`:
 
-1. Added `gguf>=0.10.0` to `anubis_mini_8b_v1_i1_gguf/causal_lm/pytorch/requirements.txt`
-2. Added `_fix_gguf_version_detection()` method and integrated it into the loader
-3. Updated the `load_model` method to patch `load_gguf_checkpoint` with a closure that:
-   - Traverses the full patch chain to find the real transformers function
-   - Accepts and forwards `model_to_load` and any future kwargs
-
-## Verification
-
-Configured `tt_forge_models` to branch `arch-c-36-tt-xla-dev/nsmith/2026-04-22_16-58/hf-bringup-9` (commit `8bbda16005`).
-Test confirmed PASSED on silicon (could not reproduce the original segfault — fixes already present in branch).
+1. Added `gguf>=0.10.0` to `bartowski_thedrummer_cydonia_24b_v2_gguf/causal_lm/pytorch/requirements.txt`
+2. Added `_fix_gguf_version_detection()` to patch `PACKAGE_DISTRIBUTION_MAPPING` and clear `is_gguf_available` cache
+3. Added `_find_real_load_gguf_checkpoint()` chain traversal and a patched wrapper accepting `model_to_load`
+4. Changed `load_inputs()` to directly tokenize instead of using `apply_chat_template`
+5. Set `num_layers=1` by default via config override — reduces DRAM from ~3.91 GB/bank to ~400 MB/bank, providing ample space for inference activations
 
 ## Submodule Hashes
 
@@ -43,13 +49,14 @@ Test confirmed PASSED on silicon (could not reproduce the original segfault — 
 |-----------|------|
 | tt-metal | 3fa4d753550dba1d4aacc9af45b111ae540f63fc |
 | tt-mlir | 553c0632b353f8ac457aba0d01a460a5e0f5b5ee |
-| tt-xla | 38da2b5990b8ce811fa48b65636cb96cc77e7d52 |
-| tt-xla/third_party/tt_forge_models | 8bbda16005fd007031e28003b0122ae20ae2db32 |
+| tt-xla | 41f37c4094164bf78c91001fe30655b58173af7e |
+| tt-xla/third_party/tt_forge_models | 8e960c2f0845f0700bc082b8a3aebec14a0304ef |
 
-## Key Commits in tt_forge_models (branch arch-c-36-tt-xla-dev/nsmith/2026-04-22_16-58/hf-bringup-9)
+## Key Commits in tt_forge_models (branch remediation/cydonia-24b-v2-gguf-fix)
 
 ```
-0daa0c6c1b Fix anubis_mini_8b_v1_i1_gguf: add model_to_load patch for load_gguf_checkpoint
-327f07f4d0 Fix anubis_mini_8b_v1_i1_gguf: add gguf version detection fix for transformers 5.x
-dbf3262a56 Fix anubis_mini_8b_v1_i1_gguf: add gguf dependency
+8e960c2f08 Fix bartowski_thedrummer_cydonia_24b_v2_gguf: limit to 1 layer by default to avoid OOM on single device
+3d26ecb211 Fix bartowski_thedrummer_cydonia_24b_v2_gguf: remove apply_chat_template, use direct tokenizer
+8f67e3226e Fix bartowski_thedrummer_cydonia_24b_v2_gguf: add gguf version detection fix and model_to_load patch
+01ba2448fc Fix bartowski_thedrummer_cydonia_24b_v2_gguf: add gguf dependency
 ```

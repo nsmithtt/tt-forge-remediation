@@ -61,6 +61,14 @@ All changes in `tt-xla/third_party/tt_forge_models` on branch:
 
 ## Commits in tt_forge_models
 
+Key commits from `7efcea60e1` (base) to `57caeafc70` (fix):
+
 ```
 57caeafc70 Fix load_gguf_checkpoint patchers: accept **kwargs for model_to_load compat
+...  (additional cleanup commits on remediation branch)
+70ac01bd56 Add mradermacher/Anubis-Mini-8B-v1-i1-GGUF causal LM model loader
 ```
+
+## Verification
+
+Test confirmed passing on silicon (1 passed in 584.77s / ~9:44).

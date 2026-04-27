@@ -1,3 +1,32 @@
+# albedo_base_xl/pytorch-AlbedoBase_XL-single_device-inference — SILICON PASS
+
+**Test**: `tests/runner/test_models.py::test_all_models_torch[albedo_base_xl/pytorch-AlbedoBase_XL-single_device-inference]`
+**Result**: PASSED (1053s, 0:17:33)
+
+## Problem
+
+AlbedoBase XL is an SDXL-based text-to-image model. Two issues blocked the test:
+
+1. **Dict argument crash in StableHLO backend**: `UNet2DConditionModel.forward()` takes `added_cond_kwargs: dict` containing `text_embeds` and `time_ids`. The TT XLA StableHLO backend cannot handle dict-typed arguments — `torch.compile`'s post-grad pass crashed in `get_node_device` because dict nodes have no `.device` attribute.
+
+2. **numpy 2.0 DeprecationWarning in `EulerDiscreteScheduler`**: `set_timesteps()` calls `np.array()` on `self.alphas_cumprod` (a `torch.Tensor`). In numpy 2.0, `torch.Tensor.__array__` does not accept the `copy` keyword, emitting a `DeprecationWarning`.
+
+## Fix
+
+All changes in `tt-xla/third_party/tt_forge_models` (`albedo_base_xl/pytorch/loader.py`):
+
+- **`UNetWrapper(nn.Module)`**: Wraps `UNet2DConditionModel` with a flat tensor interface — accepts `text_embeds` and `time_ids` as separate tensor kwargs, then reconstructs `added_cond_kwargs` dict internally before forwarding to the UNet. The compiler only sees tensor arguments.
+
+- **numpy patch in `load_inputs()`**: Converts `pipeline.scheduler.alphas_cumprod` from `torch.Tensor` to numpy array before calling `stable_diffusion_preprocessing_xl()`, preventing the numpy 2.0 deprecation warning.
+
+## Changes
+
+### `tt_forge_models` (branch: `remediation/albedo_base_xl-unet-wrapper-numpy-fix`)
+
+- `albedo_base_xl/pytorch/loader.py`: Added `UNetWrapper`, updated `load_model` to return `UNetWrapper(unet)`, updated `load_inputs` to return flat dict with separate `text_embeds`/`time_ids` keys, added numpy pre-conversion for `alphas_cumprod`.
+
+---
+
 # AIN (MBZUAI/AIN) Silicon Pass Summary
 
 **Test**: `tests/runner/test_models.py::test_all_models_torch[ain/pytorch-7B-single_device-inference]`

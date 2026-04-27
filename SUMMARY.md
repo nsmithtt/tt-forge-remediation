@@ -1,61 +1,53 @@
-# Anima FP8 NVfp4mixed - HF Bringup
+# AlinVLM v1.3 HF Bringup — Fix Summary
 
-## Test
+**Test:** `tests/runner/test_models.py::test_all_models_torch[alinvlm/pytorch-v1_3-single_device-inference]`
+**Result:** SILICON_PASS
 
+## Root causes and fixes
+
+AlinVLM uses Qwen3VLForConditionalGeneration (a multimodal transformer). Four separate issues blocked inference on TT silicon.
+
+### 1. SpeculationLogDivergence (`_stabilize_forge_models_sys_modules`)
+
+`DynamicLoader.import_model_loader` registers loaders under `tt-forge-models.*` keys in `sys.modules`.  Dynamo's `LOAD_GLOBAL` handler calls `import_source(fn.__module__)` for every function it encounters during tracing.  `fn.__module__` uses underscores (`tt_forge_models.*`), which was absent from `sys.modules`, causing Python to re-import the loader from disk mid-trace.  That re-ran `nn.Module.__getattr__ = patched_getattr` (from the MiniCPM-V loader), creating a new function object; Dynamo's speculation log had recorded the old one and raised `SpeculationLogDivergence`.
+
+**Fix:** Call `_stabilize_forge_models_sys_modules()` in `load_model()` before the first `torch.compile` trace.  It mirrors every `tt-forge-models.*` entry to `tt_forge_models.*` and adds synthetic namespace stubs so `import_source` becomes a no-op.
+
+### 2. TT L1 overflow and unsupported Conv3d (`_patched_visual_forward`)
+
+`Qwen3VLVisionModel` uses `nn.Conv3d` for patch embedding and processes sequences up to 11,008 tokens, both of which exceed TT hardware limits (L1 max ~1.5 MB per core; no Conv3d support).
+
+**Fix:** Decorate `Qwen3VLVisionModel.forward` with `@torch.compiler.disable(recursive=True)` and move the visual encoder to CPU before calling the original forward.  Also cap `max_pixels` at 28x28 (the minimum valid grid for 14x14 patches + 2x2 spatial merge): 4 patches -> 1 merged token -> ~17 total tokens -> ~140 KB of L1.
+
+### 3. LRU cache overflow from `.tolist()` graph breaks (`_get_image_features_eager`)
+
+`Qwen3VLModel.get_image_features` calls `image_grid_thw.prod(-1).tolist()` to compute split sizes.  Each `aten._local_scalar_dense` failure added a new graph break, causing 15+ recompilations that filled and overflowed the XLA LRU computation cache.
+
+**Fix:** Wrap `get_image_features` so the inner call runs through a `@torch.compiler.disable` helper, preventing the `.tolist()` from entering the compiled graph entirely.
+
+### 4. LRU cache overflow from boolean-index scatter in decoder loop (`_patched_deepstack_process`)
+
+`Qwen3VLTextModel._deepstack_process` runs inside a per-decoder-layer loop and contains:
+```python
+local_this = hidden_states[visual_pos_masks, :] + visual_embeds
+hidden_states[visual_pos_masks, :] = local_this  # index_put
 ```
-tests/runner/test_models.py::test_all_models_torch[anima_fp8/pytorch-preview3-base-nvfp4mixed-single_device-inference]
-```
+Boolean indexing with `visual_pos_masks` produces tensors whose shape equals `visual_pos_masks.sum()` — a data-dependent value.  Each unique value compiled a new XLA computation.  Called repeatedly per layer, this flooded the LRU cache and evicted earlier entries, causing the observed `RuntimeError: Check failed: cachedComputation`.
 
-## Result: SILICON_PASS
+**Fix:** Patch `Qwen3VLTextModel._deepstack_process` with `@torch.compiler.disable(recursive=True)` so it runs eagerly, never entering the XLA compilation path.
 
-The test passes on TT silicon after fixing the Anima FP8 model loader.
+### 5. RoPE index computation on TT device (`_patched_get_rope_index`)
 
-## Root Cause
+`Qwen3VLModel.get_rope_index` uses `input_ids.tolist()` and Python list control flow that cannot run on TT device tensors.
 
-The `anima_fp8/pytorch` loader used `CosmosTransformer3DModel.from_single_file()` to load
-the NVfp4mixed safetensors checkpoint. This call failed because `from_single_file`
-auto-detection requires `pos_embedder.dim_spatial_range` to identify the Cosmos 2.0
-architecture, but that key is stripped during NVfp4 quantization.
+**Fix:** Decorate with `@torch.compiler.disable`, move all inputs to CPU before calling the original method, and move the returned `position_ids` back to the original device so the subsequent RoPE matmul sees consistent devices.
 
-Additionally, the `load_inputs` method used spatial dimensions (2×2) that produced only 1
-patch per spatial dim — far below the TT hardware SDPA minimum k_chunk_size of 32.
+## Files changed
 
-## Fixes Applied
-
-### `tt-forge-models` (branch: `remediation/anima-fp8-nvfp4mixed-fix`)
-
-`anima_fp8/pytorch/loader.py`:
-
-1. **Bypass `from_single_file` auto-detection**: Construct `CosmosTransformer3DModel` directly
-   with Cosmos-Predict2-2B config (`num_attention_heads=16`, `attention_head_dim=128`,
-   `num_layers=28`, `extra_pos_embed_type=None`) then load weights manually via
-   `convert_cosmos_transformer_checkpoint_to_diffusers`.
-
-2. **Handle NVfp4mixed quantized layers**: The NVfp4mixed checkpoint stores quantized
-   layers (blocks 15–27) as packed U8 tensors with half the spatial extent. These cannot
-   be loaded directly into bfloat16 model layers. Filter the converted state dict to only
-   include shape-compatible tensors before `load_state_dict(strict=False)`. Quantized
-   layers fall back to random initialization, which is valid for the TT shape/compilation test.
-
-3. **Fix input dimensions for TT hardware SDPA**:
-   - Increase latent spatial dims from 2×2 to 16×16: with `patch_size=(1,2,2)`,
-     this yields (16/2)×(16/2) = 64 patches ≥ 32 minimum SDPA chunk size.
-   - Increase encoder sequence length from 8 to 32 for cross-attention SDPA minimum.
-   - Add `padding_mask` input (required when `concat_padding_mask=True`).
-
-### `tt-xla` (branch: `fix/anima-fp8-nvfp4mixed`)
-
-Updated `third_party/tt_forge_models` submodule pointer to the fixed commit.
-
-## Existing Fix Branch
-
-A prior fix branch `remediation/anima-fp8-fix-from-single-file-detection` existed but was
-written for a newer diffusers API (included `use_crossattn_projection`,
-`crossattn_proj_in_channels`, `encoder_hidden_states_channels` parameters not present in
-diffusers 0.35.2). That branch also did not handle the NVfp4mixed weight shape mismatch.
-The new fix is compatible with the installed diffusers 0.35.2.
+- `tt-xla/third_party/tt_forge_models/alinvlm/pytorch/loader.py` — all five patches above
+- `tt-xla/tests/runner/test_config/torch/test_config_inference_single_device.yaml` — changed `alinvlm/pytorch-v1_3` from `KNOWN_FAILURE_XFAIL` to `EXPECTED_PASSING`
 
 ## Branches
 
 - **tt-forge-models**: `remediation/anima-fp8-nvfp4mixed-fix`
-- **tt-xla**: `fix/anima-fp8-nvfp4mixed`
+- **tt-xla**: `report/alinvlm-pytorch-v1_3-hf-bringup`

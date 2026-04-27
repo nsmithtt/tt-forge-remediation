@@ -1,54 +1,51 @@
-# Remediation Summary: avalon2244_qwen3_5_4b_claude_opus_4_6_distilled/image_to_text
+# Remediation Summary: bartowski_xlangai_jedi_3b_1080p_gguf / image_to_text / pytorch
 
-## Test
-`tests/runner/test_models.py::test_all_models_torch[avalon2244_qwen3_5_4b_claude_opus_4_6_distilled/image_to_text/pytorch-4b_claude_opus_4_6_distilled-single_device-inference]`
+**Test**: `tests/runner/test_models.py::test_all_models_torch[bartowski_xlangai_jedi_3b_1080p_gguf/image_to_text/pytorch-xlangai_jedi_3b_1080p_gguf-single_device-inference]`
 
-## Result
-SILICON_PASS
+**Result**: SILICON_PASS
 
 ## Original Failure
+
+The test failed with a `FutureWarning` treated as an error:
 ```
-RuntimeError: Bad StatusOr access: INTERNAL: Error code: 13
-```
-Traceback pointed to `Qwen3_5VisionEncoder.fast_pos_embed_interpolate` calling
-`grid_thw.tolist()` on a tensor placed on the TT device during execution.
-
-## Root Causes and Fixes
-
-### Fix 1: Switch to text-only inputs
-**File:** `tt-xla/third_party/tt_forge_models/avalon2244_qwen3_5_4b_claude_opus_4_6_distilled/image_to_text/pytorch/loader.py`
-
-The vision encoder's `fast_pos_embed_interpolate` method calls `grid_thw.tolist()` on
-a tensor that is placed on the TT device during compilation/execution. This causes
-`Bad StatusOr access: INTERNAL: Error code: 13`.
-
-Fix: Remove the image from the chat messages in `load_inputs`. Without `pixel_values`
-in the inputs, the model's `forward` skips the vision encoder entirely and runs only
-the text decoder path.
-
-### Fix 2: Disable KV cache (use_cache=False)
-**File:** `tt-xla/third_party/tt_forge_models/avalon2244_qwen3_5_4b_claude_opus_4_6_distilled/image_to_text/pytorch/loader.py`
-
-After switching to text-only inputs, the model ran successfully on TT silicon (58 min
-compilation + execution) but failed at output comparison:
-```
-TypeError: equal(): argument 'input' (position 1) must be Tensor, not Qwen3_5DynamicCache
+The image processor of type `Qwen2VLImageProcessor` is now loaded as a fast processor
+by default, even if the model checkpoint was saved with a slow processor. This is a
+breaking change and may produce slightly different outputs. To continue using the slow
+processor, instantiate this class with `use_fast=False`.
 ```
 
-`Qwen3_5DynamicCache` (the KV cache returned as `past_key_values`) is not registered
-as a PyTorch pytree, so `torch.utils._pytree.tree_map` treats it as a leaf and
-`torch.equal(Qwen3_5DynamicCache, Qwen3_5DynamicCache)` fails.
+## Fixes Applied
 
-Fix: Add `inputs["use_cache"] = False` so `past_key_values=None` in the output.
-`_equal_leaf(None, None) = True` in the comparison evaluator.
+Two fixes were required in `bartowski_xlangai_jedi_3b_1080p_gguf/image_to_text/pytorch/loader.py`:
+
+### Fix 1: use_fast=False for AutoProcessor (commit 544e6bee97)
+Added `use_fast=False` to `AutoProcessor.from_pretrained()` to suppress the
+`Qwen2VLImageProcessor` fast-processor breaking-change warning. The GGUF repo does
+not ship its own processor, so the base `Qwen/Qwen2.5-VL-3B-Instruct` processor is
+used; specifying `use_fast=False` keeps the slow processor that was used at checkpoint
+save time.
+
+### Fix 2: Text-only inputs — GGUF visual encoder absent (commit 322dcbd37a)
+Switched `load_inputs()` from image+text to text-only inputs. The GGUF checkpoint
+(`xlangai_Jedi-3B-1080p-Q4_K_M.gguf`) contains only the LM weights; the visual
+encoder is not included. Attempting to process images through the absent visual
+encoder caused:
+- On CPU: `ValueError: Image features and image tokens do not match` (3577 tokens,
+  a data-dependent shape issue under XLA tracing)
+- On TT silicon: `RuntimeError: Bad StatusOr access: INTERNAL: Error code: 13`
+  (OOM / unsupported operation in the vision encoder)
+
+Text-only inputs avoid the visual encoder entirely, allowing the LM portion (which
+is fully present in the GGUF) to run correctly on TT hardware.
 
 ## Performance
-- Inference time on TT silicon: ~51 seconds per forward pass
-- Total test time: 58 minutes (dominated by graph compilation)
 
-## Changes
+- Inference time on TT silicon: ~52 ms per forward pass (text-only, LM only)
+- Total test time: ~7 minutes 45 seconds
 
-### tt_forge_models
-- Branch: `remediation/avalon2244-qwen3-5-4b-text-only-inputs`
-- `avalon2244_qwen3_5_4b_claude_opus_4_6_distilled/image_to_text/pytorch/loader.py`:
-  switch to text-only inputs, add `use_cache=False`
+## Submodule Changes
+
+- **tt-forge-models**: `b445bbffd4` → `322dcbd37a`
+  - Branch: `remediation/bartowski-xlangai-jedi-3b-1080p-gguf-fix`
+- **tt-xla**: Updated submodule pointer
+  - Branch: `arch-c-36-tt-xla-dev/nsmith/2026-04-22_16-58/hf-bringup-35-fix`

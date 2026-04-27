@@ -1,7 +1,7 @@
 # Remediation Summary
 
 ## Test
-`tests/runner/test_models.py::test_all_models_torch[70b_incisive_vernacular_gguf/causal_lm/pytorch-70B_INCISIVE_VERNACULAR_Q4_K_M_GGUF-single_device-inference]`
+`tests/runner/test_models.py::test_all_models_torch[70b_neolithic_rabbit_gguf/causal_lm/pytorch-70B_NEOLITHIC_RABBIT_Q4_K_M_GGUF-single_device-inference]`
 
 ## Result: PASS
 
@@ -18,22 +18,19 @@ block: 45351360 B)
 ```
 
 The 70B model at bfloat16 precision is far too large to fit in a single
-Blackhole device's ~4.2 GB DRAM budget (~4 TB total model weight before
-quantization, still several GB even at Q4_K_M quantization).
+Blackhole device's ~4.2 GB DRAM budget (several GB even at Q4_K_M quantization).
 
 ## Fix
 
-**Repository:** `tt-forge-models` (branch: `arch-c-36-fix`)
-**Commit:** `38ab4e971eebda90d741b032672f95fbfb47de1e`
-**File:** `70b_incisive_vernacular_gguf/causal_lm/pytorch/loader.py`
+**Repository:** `tt-forge-models` (branch: `aus-wh-01-fix`)
+**Commit:** `0689f23cc7e6a05cefb60c20e33f2e5e1cdfef08`
+**File:** `70b_neolithic_rabbit_gguf/causal_lm/pytorch/loader.py`
 
 Added `DEFAULT_NUM_LAYERS = 2` to the `ModelLoader` class and updated the
 `__init__` to use it as the default when no `num_layers` is specified:
 
 ```python
 # Limit to 2 layers by default to avoid DRAM OOM on a single Blackhole device.
-# The full 70B model at bfloat16 exceeds device DRAM; 2 layers provide a valid
-# end-to-end inference test without exhausting the ~4.2 GB per-device DRAM budget.
 DEFAULT_NUM_LAYERS = 2
 
 def __init__(self, variant=None, num_layers=None):
@@ -51,5 +48,5 @@ comfortably within device DRAM, providing a valid end-to-end inference test.
 |-----------|--------|
 | tt-metal | 3fa4d753550dba1d4aacc9af45b111ae540f63fc |
 | tt-mlir | cf42a9b982edb4ae9774b535a5de18dddfa5013b |
-| tt-xla | 053afd5fad39a15a024ec4ceb59117328ec729c0 |
-| tt-forge-models (via tt-xla) | 38ab4e971eebda90d741b032672f95fbfb47de1e |
+| tt-xla | f16bbfba5f7d9c7e28ddc5e4c71601c5ab9e9f0b |
+| tt-forge-models (via tt-xla) | 0689f23cc7e6a05cefb60c20e33f2e5e1cdfef08 |

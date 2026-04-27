@@ -10,45 +10,32 @@ tests/runner/test_models.py::test_all_models_torch[anubis_mini_8b_v1_i1_gguf/cau
 
 ## Root Cause
 
-Multiple GGUF model loaders in `tt_forge_models` monkey-patch the
-`transformers.modeling_gguf_pytorch_utils.load_gguf_checkpoint` function to
-add support for new GGUF architectures (e.g., qwen35, gpt-oss). These patches
-chain together at module import time during pytest collection.
+Multiple issues were present in the anubis_mini_8b_v1_i1_gguf model loader:
 
-A newer version of `transformers` added a `model_to_load` keyword argument to
-`load_gguf_checkpoint`. 26 loader files had the old patch signature
-`(gguf_path, return_tensors=False)` that rejected this kwarg, causing:
+1. **Missing `gguf` dependency** — The `requirements.txt` for this model did not list `gguf>=0.10.0`, causing import failures at runtime.
 
-```
-TypeError: _patched_load_gguf_checkpoint() got an unexpected keyword argument 'model_to_load'
-```
+2. **GGUF version detection broken with transformers 5.x** — `transformers` caches `PACKAGE_DISTRIBUTION_MAPPING` at import time. When `gguf` is installed later (by `RequirementsManager`), the mapping is stale and version detection returns `'N/A'`, crashing `packaging.version.parse`. Fixed by patching `PACKAGE_DISTRIBUTION_MAPPING` with `gguf` and clearing the `is_gguf_available` cache.
+
+3. **`load_gguf_checkpoint` patch incompatibility with `model_to_load` kwarg** — A newer version of `transformers` added a `model_to_load` keyword argument to `load_gguf_checkpoint`. The GGUF model loader patched this function but did not accept/forward the new kwarg, causing:
+
+   ```
+   TypeError: _patched_load_gguf_checkpoint() got an unexpected keyword argument 'model_to_load'
+   ```
 
 ## Fix
 
-Updated 26 GGUF loader files in `tt_forge_models` to add `**kwargs` to the
-`_patched_load_gguf_checkpoint` function signatures and forward them to the
-original function. This ensures compatibility with any future kwargs added to
-`load_gguf_checkpoint`.
+All three issues were fixed in the `tt_forge_models` branch `arch-c-36-tt-xla-dev/nsmith/2026-04-22_16-58/hf-bringup-9`:
 
-**Pattern changed (in 26 files):**
-```python
-# Before:
-def _patched_load_gguf_checkpoint(gguf_path, return_tensors=False):
-    ...
-    result = _orig_load_gguf_checkpoint(gguf_path, return_tensors=return_tensors)
+1. Added `gguf>=0.10.0` to `anubis_mini_8b_v1_i1_gguf/causal_lm/pytorch/requirements.txt`
+2. Added `_fix_gguf_version_detection()` method and integrated it into the loader
+3. Updated the `load_model` method to patch `load_gguf_checkpoint` with a closure that:
+   - Traverses the full patch chain to find the real transformers function
+   - Accepts and forwards `model_to_load` and any future kwargs
 
-# After:
-def _patched_load_gguf_checkpoint(gguf_path, return_tensors=False, **kwargs):
-    ...
-    result = _orig_load_gguf_checkpoint(gguf_path, return_tensors=return_tensors, **kwargs)
-```
+## Verification
 
-## Changes Made
-
-All changes in `tt-xla/third_party/tt_forge_models` on branch:
-`remediation/anubis-mini-gguf-fix-kwargs-compat`
-
-26 files modified (all `*/causal_lm/pytorch/loader.py` with the old signature pattern).
+Configured `tt_forge_models` to branch `arch-c-36-tt-xla-dev/nsmith/2026-04-22_16-58/hf-bringup-9` (commit `8bbda16005`).
+Test confirmed PASSED on silicon (could not reproduce the original segfault — fixes already present in branch).
 
 ## Submodule Hashes
 
@@ -56,19 +43,13 @@ All changes in `tt-xla/third_party/tt_forge_models` on branch:
 |-----------|------|
 | tt-metal | 3fa4d753550dba1d4aacc9af45b111ae540f63fc |
 | tt-mlir | 553c0632b353f8ac457aba0d01a460a5e0f5b5ee |
-| tt-xla | 767c887326ded96efb84e7d8a1e3d07e24b30a95 |
-| tt-xla/third_party/tt_forge_models | 57caeafc70e8edcffa24cb40d07f965a677661d0 |
+| tt-xla | 38da2b5990b8ce811fa48b65636cb96cc77e7d52 |
+| tt-xla/third_party/tt_forge_models | 8bbda16005fd007031e28003b0122ae20ae2db32 |
 
-## Commits in tt_forge_models
-
-Key commits from `7efcea60e1` (base) to `57caeafc70` (fix):
+## Key Commits in tt_forge_models (branch arch-c-36-tt-xla-dev/nsmith/2026-04-22_16-58/hf-bringup-9)
 
 ```
-57caeafc70 Fix load_gguf_checkpoint patchers: accept **kwargs for model_to_load compat
-...  (additional cleanup commits on remediation branch)
-70ac01bd56 Add mradermacher/Anubis-Mini-8B-v1-i1-GGUF causal LM model loader
+0daa0c6c1b Fix anubis_mini_8b_v1_i1_gguf: add model_to_load patch for load_gguf_checkpoint
+327f07f4d0 Fix anubis_mini_8b_v1_i1_gguf: add gguf version detection fix for transformers 5.x
+dbf3262a56 Fix anubis_mini_8b_v1_i1_gguf: add gguf dependency
 ```
-
-## Verification
-
-Test confirmed passing on silicon (1 passed in 584.77s / ~9:44).

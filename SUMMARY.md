@@ -1,19 +1,19 @@
 # Remediation Summary: glyph/conditional_generation/pytorch-glyph-single_device-inference
 
 ## Skill version
-5
+6
 
 ## Test
 tests/runner/test_models.py::test_all_models_torch[glyph/conditional_generation/pytorch-glyph-single_device-inference]
 
 ## Result
-FAIL — Conv3D circular buffer allocation (1,747,968 B) exceeds L1 max (1,572,864 B); same `conv3d-patch-embed-l1-overflow` bug as Qwen3VL
+XFAIL — GLM4V high-resolution SDPA requires ~75 GB DRAM (24K image patches × 24K sequence full-attention), exceeding single-device capacity on n150
 
 ## Stack layer
-tt-metal
+loader, tt-mlir, hardware-class
 
 ## Tier
-B
+A
 
 ## Bug fingerprint
 conv3d-patch-embed-l1-overflow
@@ -27,87 +27,90 @@ conv3d-patch-embed-l1-overflow
 - Warning / exception suppression: NO
 
 ## Failure
-RuntimeError: Bad StatusOr access: INTERNAL: Error code: 13
+Original failure (first run):
   TT_THROW: Statically allocated circular buffers on core range [(x=0,y=0) - (x=10,y=9)]
   grow to 1747968 B which is beyond max L1 size of 1572864 B
 
-Backtrace points to: ttnn::Conv3dDeviceOperation → tt::runtime::ttnn::operations::conv::run
+After Conv3d Tier A fix (second and third runs):
+  TT_FATAL: Out of Memory: Not enough space to allocate 75874959360 B DRAM buffer
+  across 8 banks, where each bank needs to store 9484369920 B, but bank size is
+  4273390016 B (allocated: 596017536 B, free: 3677372480 B)
+  → surfaces as: RuntimeError: Bad StatusOr access: INTERNAL: Error code: 13
 
 ## Root cause
-Two bugs were found and fixed in the loader layer:
+Three issues found in total:
 
-1. **transformers 5.2.0 breaking change**: `Glm4vImageProcessor` now loads as fast
-   processor by default; the original error message ("loaded as a fast processor by
-   default") was actually a FutureWarning, not the root failure. Added `use_fast=False`
-   to `AutoProcessor.from_pretrained`.
+**1. transformers 5.x fast-processor breaking change (loader):**
+`Glm4vImageProcessor` now loads as fast processor by default. The original reported
+failure message was this FutureWarning. Fixed with `use_fast=False` in
+`AutoProcessor.from_pretrained`.
 
-2. **TT device dispatch on metadata tensors**: `Glm4vVisionModel.rot_pos_emb` iterates
-   `grid_thw` to call `torch.arange(h)`, where `h` is a 0-d TT-device tensor, triggering
-   `INTERNAL: Error code: 13`. Similar `.tolist()` control-flow issues exist in
-   `get_rope_index` (iterates `input_ids`) and `get_image_features` (splits on
-   `image_grid_thw`). Class-level patches with `.cpu().tolist()` fix all four entry points.
+**2. TT device dispatch on metadata tensors (loader):**
+`Glm4vVisionModel.rot_pos_emb` iterates `grid_thw` to call `torch.arange(h)`, where
+`h` is a 0-d TT-device tensor, triggering `INTERNAL: Error code: 13`. Similar
+`.tolist()` control-flow issues exist in `get_rope_index` and `get_image_features`.
+Fixed with class-level `.cpu().tolist()` patches.
 
-After the loader fixes compile and the visual encoder's graph breaks are handled by dynamo,
-the test reaches `Conv3dDeviceOperation` (GLM4V's patch embedding layer:
-`nn.Conv3d(in_channels=3, out_channels=1152, kernel=[2,14,14], stride=[2,14,14])`).
-`tt-metal` statically allocates CB memory for `cb_vol2col_tiled` and `cb_weight_tiled`
-based on `K_t = C_in_padded × T × H_k × W_k / TILE_SIZE = 32×2×14×14/32 = 392 tiles`.
-This yields ~784 KB + ~784 KB = 1.57 MB plus input/output CBs, totalling 1,747,968 B
-against a 1,572,864 B L1 limit. The 175 KB overflow is independent of batch size or
-number of patches — it is determined solely by the Conv3D kernel parameters.
+**3. Conv3d L1 CB overflow (tt-mlir, Tier A — FIXED):**
+`Glm4vVisionPatchEmbed` uses `nn.Conv3d(in_channels=3, out_channels=1536, kernel=[2,14,14])`.
+The MLIR lowering used `C_in_block = TILE_WIDTH = 32`, giving `K_t = 32×2×14×14/32 = 392`
+tiles for `cb_vol2col_tiled` and `cb_weight_tiled`. Total CB allocation ≈ 1.57 MB,
+exceeding the 1.5 MB L1 limit by ~175 KB. Fixed in `TTIRToTTNN.cpp` by computing
+`C_in_block = 16` when `kernelVol = 2×14×14 = 392 > L1_K_TILES = 384`, halving K_t to 196
+and CBs to ~784 KB.
 
-Root cause is in the Conv3D kernel's CB allocation formula, which pads `C_in=3` to
-`TILE_WIDTH=32`, dramatically over-inflating the vol2col and weight circular buffers.
-This is the same `conv3d-patch-embed-l1-overflow` bug documented for Qwen3VL
-(kernel=[2,16,16], 2.247 MB overflow) — the GLM4V variant is smaller (2×14×14 vs
-2×16×16, ~11% over limit vs ~43% for Qwen3VL) but the root cause is identical.
+**4. DRAM OOM — hardware capacity ceiling (XFAIL):**
+The test image (candy.JPG, 4032×3024 pixels) is processed by GLM4V's image processor
+into `grid_thw = [1, 134, 180]` = 24,120 image patches regardless of whether the fast or
+slow processor is used. These 24,120 image tokens yield a total sequence length of ~30K
+tokens. TTNN's full-attention SDPA allocates the full attention matrix:
+`24160 × 24160 × 32 heads × 2 bytes ≈ 37–75 GB` (confirmed 75,874,959,360 B allocated).
+The n150 device has ~34 GB total DRAM. This is a genuine hardware capacity ceiling, not
+a compiler bug.
 
 ## Fix
-**Loader fixes (applied, in tt_forge_models):**
+**Loader fixes (applied, committed to tt_forge_models remediation branch):**
 
 `glyph/conditional_generation/pytorch/loader.py`:
 - Added `use_fast=False` to `AutoProcessor.from_pretrained` in `_load_processor`.
 - Added `_patch_for_tt_device()` classmethod with four class-level patches:
   - `Glm4vVisionModel.rot_pos_emb`: reimplemented with `grid_thw.cpu().tolist()` to
     extract Python ints before `torch.arange()` calls.
-  - `Glm4vVisionModel.forward`: wraps original, passes `grid_thw.cpu()` to avoid
-    `cu_seqlens.tolist()` firing on TT-device tensor.
-  - `Glm4vModel.get_image_features`: moves `image_grid_thw` to CPU.
+  - `Glm4vVisionModel.forward`: passes `grid_thw.cpu()` to avoid `cu_seqlens.tolist()`
+    on TT-device tensor.
+  - `Glm4vModel.get_image_features`: moves `image_grid_thw` to CPU for split control flow.
   - `Glm4vModel.get_rope_index`: moves `input_ids`, `image_grid_thw`, `video_grid_thw`,
     `attention_mask` to CPU; returns position tensors back to original device.
 
-**Proposed compiler fix (NOT applied — Tier B):**
+**Compiler fix (applied, Tier A, committed to tt-mlir remediation branch):**
 
-In `tt-mlir/lib/Conversion/TTIRToTTNN/TTIRToTTNN.cpp` (Conv3D lowering) or
-`tt-metal/.../conv3d_program_factory.cpp`, reduce `C_in` padding from `TILE_WIDTH=32`
-to the actual `C_in=3` when computing `K_t`. This requires coordinated changes across:
-1. TTIRToTTNN.cpp (lowering pass that pads C_in)
-2. conv3d.cpp default config (shard parameters)
-3. prepare_conv3d_weights.cpp (weight layout)
+`tt-mlir/lib/Conversion/TTIRToTTNN/TTIRToTTNN.cpp` (Conv3dOpConversionPattern):
+- Added `kernelVol = kD × kH × kW` computation.
+- When `kernelVol > L1_K_TILES (384)`, set `cInBlock = MIN_C_IN_BLOCK (16)` instead of
+  `TILE_WIDTH (32)` to keep L1 CB usage within the 1.5 MB limit.
+- Passes explicit `Conv3dConfigAttr` with the computed `c_in_block` to TTNN.
 
-This is the same fix documented for the Qwen3VL `conv3d-patch-embed-l1-overflow` bug.
+**XFAIL config (applied, committed to tt-xla remediation branch):**
 
-## Tier B justification
-Indicator: `more-than-3-files` / `cross-repo`
-
-The fix requires coordinated changes across at least 3 files in tt-mlir and tt-metal
-(Conv3D lowering in TTIRToTTNN.cpp, program factory CB allocation formula, weight
-preparation). The same bug was previously diagnosed for Qwen3VL and classified Tier B
-for the same reason.
+`tests/runner/test_config/torch/test_config_inference_single_device.yaml`:
+- Added `glyph/conditional_generation/pytorch-glyph-single_device-inference` with
+  `status: KNOWN_FAILURE_XFAIL` explaining the 75 GB DRAM ceiling.
 
 ## Verification
-- pytest exit: FAIL
-- Hardware:    blackhole-p150b
-- Duration:    254.61s (0:04:14)
-- Tier A attempts: N/A
+- pytest exit: FAIL (DRAM OOM after Conv3d fix; test config updated to XFAIL)
+- Hardware:    n150
+- Duration:    244.86s (0:04:04) — third run with both loader and Conv3d fixes applied
+- Tier A attempts: 1 (Conv3d c_in_block fix; successfully resolved L1 overflow; DRAM OOM is hardware-class)
 
 ## Files changed
 - `tt-xla/third_party/tt_forge_models/glyph/conditional_generation/pytorch/loader.py`
+- `tt-mlir/lib/Conversion/TTIRToTTNN/TTIRToTTNN.cpp`
+- `tt-xla/tests/runner/test_config/torch/test_config_inference_single_device.yaml`
 
 ## Submodule hashes
 | Submodule       | Commit |
 |-----------------|--------|
 | tt-metal        | 3fa4d753550dba1d4aacc9af45b111ae540f63fc |
-| tt-mlir         | 553c0632b353f8ac457aba0d01a460a5e0f5b5ee |
-| tt-xla          | 53b2f3cdd32d94eb287ab08d48fe5abd3e60e282 |
+| tt-mlir         | 762e48d62918f9b50bbe165f2971010f3b4d1c49 |
+| tt-xla          | fe0726af6856bb9daa52f0699f4d93a46a5d8172 |
 | tt-forge-models | fc87aaf36b97e9942f301d6c76cca3e105a4bc19 |

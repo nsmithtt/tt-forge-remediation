@@ -16,7 +16,7 @@ loader
 N/A
 
 ## Bug fingerprint
-transformers-5x-use-fast-default
+huspacy-spacy-namespace-package-collision
 
 ## Workaround self-check
 - Layer trimming: NO
@@ -47,7 +47,7 @@ Two changes in `tt_forge_models` on branch `remediation/git_rsclip-image_text_si
 ## Verification
 - pytest exit: PASS
 - Hardware:    n150
-- Duration:    164.99s
+- Duration:    109.62s
 - Tier A attempts: N/A
 
 ## Files changed
@@ -59,5 +59,5 @@ Two changes in `tt_forge_models` on branch `remediation/git_rsclip-image_text_si
 |-----------------|--------|
 | tt-metal        | 3fa4d753550dba1d4aacc9af45b111ae540f63fc |
 | tt-mlir         | 553c0632b353f8ac457aba0d01a460a5e0f5b5ee |
-| tt-xla          | 073c9589a406ad5d485ffc238179b14ef95d2797 |
-| tt-forge-models | af50b391517a37949009bb202c78386f495a475e |
+| tt-xla          | 94362e631171473c01993b3e216b6ae8ebb93ab8 |
+| tt-forge-models | defa459feccb030c6f7aeea67c13acf2016a04ec |

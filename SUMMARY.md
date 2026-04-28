@@ -80,6 +80,11 @@ Both bugs were fixed in the loader (`tt_forge_models/dolphin_27_mixtral_8x7b_ggu
   3. Patches `load_gguf_checkpoint` to replace `TENSOR_PROCESSORS["llama"]` with
      `MixtralTensorProcessor` for the duration of any call where `model_to_load.config.model_type == "mixtral"`.
 
+**Fix for Bug 3** (commit `b0d3597869` on `remediation/dolphin-27-mixtral-8x7b-gguf-causal-lm`):
+- Fixed hardcoded `vocab_size=32000` in `_build_mixtral_config_from_gguf()`: this GGUF has
+  32002 tokens (`tokenizer.ggml.tokens` array). Now reads vocab_size from that field,
+  falling back to `llama.vocab_size` then 32000.
+
 The XFAIL entry was added in tt-xla at
 `tests/runner/test_config/torch/test_config_inference_single_device.yaml`
 (commit `bd3f880685` on `remediation/dolphin-27-mixtral-8x7b-gguf-causal-lm`).
@@ -99,5 +104,5 @@ The XFAIL entry was added in tt-xla at
 |-----------------|--------|
 | tt-metal        | 3fa4d753550dba1d4aacc9af45b111ae540f63fc |
 | tt-mlir         | 553c0632b353f8ac457aba0d01a460a5e0f5b5ee |
-| tt-xla          | e253a5c4160a3b1b1196ccb46dc086015c8c5883 |
-| tt-forge-models | de66b59879631617d57d70d4d11e68b7abfd1b09 |
+| tt-xla          | f8d6ce0e4078ec12e8fb1e8bc2aafdd04dfec520 |
+| tt-forge-models | b0d3597869efbe44e58af8c1085e1de8dae9b7d2 |

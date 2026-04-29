@@ -53,13 +53,14 @@ AssertionError: Evaluation result 0 failed: PCC comparison failed. Calculated: p
 
 **Evaluator (fixed):** `Qwen3_5DynamicCache` (the hybrid KV+SSM cache for this model) does not inherit from `transformers.Cache`, so `_match_data_types` in `torch_comparison_evaluator.py` did not invoke `_cache_to_legacy` on it. `tree_map(_equal_leaf, ...)` then tried `torch.equal(Qwen3_5DynamicCache, ...)` and raised TypeError. Fix: duck-type detection (`key_cache`/`value_cache` attributes) + `_cache_to_legacy` extension to flatten per-layer KV tensors and SSM states.
 
-**PCC failure (unfixed):** After both fixes, the model compiles and runs on TT silicon (2 inference samples, ~49 s/sample on blackhole-p150b) but PCC is 0.62 (required 0.99). Root cause is unclear: the Qwen3.5 SSM hybrid uses Mamba-style linear attention layers whose scan operations and/or SSM state computations (conv1d, recurrent scan) may produce incorrect values on TT silicon, or the SSM cache tensors (conv_states, recurrent_states) have numerically large divergence while logits are actually correct. Distinguishing these requires per-tensor PCC instrumentation, which is beyond one Tier A attempt.
+**PCC failure (unfixed):** After all loader and evaluator fixes, the model compiles and runs on TT silicon (2 inference samples, ~48 s/sample) but PCC is 0.62 (required 0.99). A CPU-side diagnostic measured the bfloat16 precision floor (CPU bf16 vs CPU f32): logits 0.955, attention KV min 0.972/0.977, SSM conv_states min 0.982, SSM recurrent_states min 0.931, overall min 0.931. TT silicon produced 0.62 — 0.31 below the bf16 floor — confirming this is a genuine compiler accuracy problem, not bfloat16 rounding alone. The root cause (which TT op or lowering introduces the extra divergence in the SSM scan/gated-DeltaNet computation) requires per-tensor TT instrumentation to identify.
 
 ## Fix
 **tt_forge_models** (`remediation/bjivanovich_qwen3_5_4b_vision_gguf-causal_lm-pytorch-4B_Vision_GGUF-single_device-inference`):
 - `ded5b43664`: Fix `_patched_load_gguf_checkpoint` in 26 loaders to forward `**kwargs` for transformers 5.x `model_to_load` compatibility
 - `2677e42da8`: Add `_qwen35_vision_gguf_context()` context manager to bjivanovich loader: SSM hybrid detection, qwen35→qwen3_5_text remapping, custom TensorProcessor for conv1d reshape and A_log transform
 - `fab3311bf4`: Fix `load_shard_spec` to skip `self_attn` on `linear_attention` layers
+- `60b1b0ba3f`: Register `qwen3_5_text` in `GGUF_TO_FAST_CONVERTERS` so the loader is self-sufficient (full pytest session was silently relying on tvall43/unified_reward loaders having registered this key at import time)
 
 **tt-xla** (`remediation/bjivanovich_qwen3_5_4b_vision_gguf-causal_lm-pytorch-4B_Vision_GGUF-single_device-inference`):
 - `1113278ec`: Extend `_cache_to_legacy` and `_match_data_types` in `tests/infra/evaluators/torch_comparison_evaluator.py` to handle `Qwen3_5DynamicCache` (non-`Cache`-subclass hybrid cache with `key_cache`/`value_cache` lists)
@@ -67,23 +68,24 @@ AssertionError: Evaluation result 0 failed: PCC comparison failed. Calculated: p
 ## Tier B justification
 cross-cutting
 
-SSM/Mamba linear attention scan operations in the Qwen3.5 hybrid model produce PCC 0.62 on TT silicon. Root cause is either: (a) scan op numerical divergence in tt-mlir/tt-metal lowering for Mamba-style layers, or (b) the comparison now includes SSM state tensors (conv_states, recurrent_states) that are inherently more numerically sensitive than logits. Determining which requires per-tensor PCC instrumentation across all model outputs; fixing (a) would require tt-mlir/tt-metal changes to scan op lowering across potentially many files. One Tier A attempt (evaluator fix) was made and did not produce a passing test.
+TT silicon produces PCC 0.62, vs a measured CPU bf16 floor of 0.931 (SSM recurrent states, which are the most numerically sensitive tensors). The 0.31 gap below the bf16 floor is genuine compiler divergence, not rounding. Root cause — which specific op/lowering in the gated-DeltaNet scan produces the error — requires per-tensor TT instrumentation; fixing it would touch SSM-specific lowering across multiple files in tt-mlir/tt-metal. One Tier A attempt (evaluator fix) was made and did not produce a passing test.
 
 ## Verification
 - pytest exit: FAIL
 - Hardware:    blackhole-p150b
-- Duration:    4197.68s (1:09:57)
+- Duration:    4268.11s (1:11:08)
 - Tier A attempts: 1
 
 ## Files changed
 - `tt_forge_models/bjivanovich_qwen3_5_4b_vision_gguf/causal_lm/pytorch/loader.py`
 - `tt_forge_models/tvall43_qwen3_5_4b_heretic_v2_i1_gguf/causal_lm/pytorch/loader.py` (and 25 other qwen35 loaders)
 - `tt-xla/tests/infra/evaluators/torch_comparison_evaluator.py`
+- `tt_forge_models/bjivanovich_qwen3_5_4b_vision_gguf/causal_lm/pytorch/loader.py` (qwen3_5_text GGUF_TO_FAST_CONVERTERS registration)
 
 ## Submodule hashes
 | Submodule       | Commit |
 |-----------------|--------|
 | tt-metal        | 3fa4d753550dba1d4aacc9af45b111ae540f63fc |
 | tt-mlir         | 553c0632b353f8ac457aba0d01a460a5e0f5b5ee |
-| tt-xla          | 1113278ec68e95d0176f310f9388fe7372ddb496 |
-| tt-forge-models | fab3311bf4883e8ca4da827702ccb6bb097ded96 |
+| tt-xla          | 6ef5815d3d11e5bab0c7a8d8b84b5ab2849d3af1 |
+| tt-forge-models | 60b1b0ba3fa17c8ef8ba67cd86cc5c8e26b49e75 |

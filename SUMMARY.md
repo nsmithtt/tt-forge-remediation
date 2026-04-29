@@ -94,5 +94,5 @@ The non-tile-aligned SDPA fix requires changes to the TTNN SDPA kernel's memory 
 |-----------------|--------|
 | tt-metal        | 3fa4d753550dba1d4aacc9af45b111ae540f63fc |
 | tt-mlir         | 6929e98f8c9e965bd2402aff7519da67e236046f |
-| tt-xla          | 94362e631171473c01993b3e216b6ae8ebb93ab8 |
+| tt-xla          | bc4fb83a2c817f4e7bf4ee5b97134a524670c289 |
 | tt-forge-models | c690ed30e47153a3fc746323a88eaec47e214a81 |

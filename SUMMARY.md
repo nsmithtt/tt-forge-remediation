@@ -77,7 +77,7 @@ Dropping these casts on CPU explains ~8-point PCC drop (1.0→0.88). TT silicon 
 ## Verification
 - pytest exit: FAIL
 - Hardware: n150
-- Duration: 3906.69s (1:05:06)
+- Duration: 3632.52s (1:00:32)
 - Tier A attempts: N/A
 
 ## Files changed

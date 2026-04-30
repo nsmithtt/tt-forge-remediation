@@ -42,7 +42,7 @@ from `aten.slice.Tensor` in the XLA lazy backend, triggered by `SlidingWindowCac
 
 **Bug 1 — loader layer**: `gemma3n` is registered in gguf-py's `MODEL_ARCH_NAMES` but not in transformers 5.2.0's GGUF registration tables (`GGUF_SUPPORTED_ARCHITECTURES`, `GGUF_TO_TRANSFORMERS_MAPPING`, `TENSOR_PROCESSORS`). When `get_gguf_hf_weights_map` looks up the architecture, it raises `NotImplementedError`.
 
-A secondary complication: 26 other GGUF loaders in the test suite (bartowski_*, daniloreddy_*, dmind_*, etc.) monkey-patch `load_gguf_checkpoint` at import time with a fixed-signature wrapper `_patched_load_gguf_checkpoint(gguf_path, return_tensors=False)` that drops the `model_to_load` keyword argument required by transformers 5.x. By the time the gemma3n model is loaded in the test session, the global `load_gguf_checkpoint` binding points to one of these broken wrappers, causing `TypeError`.
+A secondary complication: 26 other GGUF loaders in the test suite monkey-patch `load_gguf_checkpoint` at import time with a fixed-signature wrapper that drops the `model_to_load` keyword argument required by transformers 5.x. By the time the gemma3n model is loaded in the test session, the global `load_gguf_checkpoint` binding points to one of these broken wrappers, causing `TypeError`.
 
 Additionally, `configuration_utils.py` imports `load_gguf_checkpoint` at module level (line 29), not inside the function, so `AutoConfig.from_pretrained` uses a stale binding separate from `modeling_gguf_pytorch_utils.load_gguf_checkpoint`. Without patching `configuration_utils.load_gguf_checkpoint`, the config loads with `model_type="gemma3n"` instead of `"gemma3n_text"`, causing `Gemma3nForConditionalGeneration` (the multimodal class) to be instantiated instead of `Gemma3nForCausalLM`, with mismatched tensor sizes.
 
@@ -65,7 +65,7 @@ In `TorchFunctionOverride.__torch_function__`, added a guard for `func is torch.
 ## Verification
 - pytest exit: PASS
 - Hardware:    blackhole-p150b
-- Duration:    1192.42s (0:19:52)
+- Duration:    773.12s (0:12:53)
 - Tier A attempts: 1
 
 ## Files changed

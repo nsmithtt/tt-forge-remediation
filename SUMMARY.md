@@ -58,9 +58,9 @@ Two distinct issues were found:
 - `tests/runner/test_config/torch/test_config_inference_single_device.yaml`: Added `apertus_70b_instruct/causal_lm/pytorch-70B_INSTRUCT_2509-single_device-inference` with `status: KNOWN_FAILURE_XFAIL` and the OOM error as reason.
 
 ## Verification
-- pytest exit: FAIL (OOM after loader fix; original AttributeError is resolved)
+- pytest exit: XFAIL
 - Hardware:    blackhole-p150b
-- Duration:    115.79s (0:01:55)
+- Duration:    113.64s (0:01:53)
 - Tier A attempts: N/A
 
 ## Files changed

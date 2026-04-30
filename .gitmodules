@@ -4,6 +4,7 @@
 [submodule "tt-mlir"]
 	path = tt-mlir
 	url = git@github.com:tenstorrent/tt-mlir.git
+	branch = remediation/gliner_multitask-pytorch-Multitask-v1.0-single_device-inference
 [submodule "tt-metal"]
 	path = tt-metal
 	url = git@github.com:tenstorrent/tt-metal.git

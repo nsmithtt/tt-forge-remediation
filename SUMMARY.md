@@ -29,7 +29,7 @@ hardware-capacity
 ## Failure
 Original CI failure: `raise AttributeError(` — gpt-oss GGUF architecture not registered in GGUF_SUPPORTED_ARCHITECTURES and GGUF_TO_TRANSFORMERS_MAPPING, plus narrow `_patched_load_gguf_checkpoint(gguf_path, return_tensors=False)` from another GGUF loader imported during collection causing `TypeError: _patched_load_gguf_checkpoint() got an unexpected keyword argument 'model_to_load'`.
 
-After loader fixes: `RuntimeError: Bad StatusOr access: INTERNAL: Error code: 13` from `torch_xla._XLAC._run_cached_graph` during device execution.
+After loader fixes: `TT_FATAL: Out of Memory: Not enough space to allocate 1061683200 B DRAM buffer across 8 banks, where each bank needs to store 132710400 B, but bank size is 4273390016 B (allocated: 4221954688 B, free: 51435328 B, largest free block: 45589184 B)` → `RuntimeError: Bad StatusOr access: INTERNAL: Error code: 13` from `torch_xla._XLAC._run_cached_graph`.
 
 ## Root cause
 Multiple loader bugs stacked:
@@ -51,9 +51,9 @@ After all loader fixes, the model loads and compiles successfully. At execution,
 - `tests/runner/test_config/torch/test_config_inference_single_device.yaml` — add `KNOWN_FAILURE_XFAIL` entry for this test
 
 ## Verification
-- pytest exit: FAIL (INTERNAL: Error code: 13 — hardware OOM)
+- pytest exit: FAIL (TT_FATAL: Out of Memory → INTERNAL: Error code: 13)
 - Hardware: n150
-- Duration: 964.36s (0:16:04) — model loaded and compiled; failed at device execution
+- Duration: 964.36s (0:16:04) first run; 1228.88s (0:20:28) second run — model loaded and compiled; failed at device execution with OOM
 - Tier A attempts: N/A
 
 ## Files changed
@@ -73,5 +73,5 @@ After all loader fixes, the model loads and compiles successfully. At execution,
 |-----------------|--------|
 | tt-metal        | 3fa4d753550dba1d4aacc9af45b111ae540f63fc |
 | tt-mlir         | 553c0632b353f8ac457aba0d01a460a5e0f5b5ee |
-| tt-xla          | 86b8d4fd11d14bb2a53845945f7dbe4685527169 |
+| tt-xla          | 6e5337b820be528cfedaac4f6b5b14d101f065a3 |
 | tt-forge-models | 48189a428e830f8d27ddd33a62420a0a6b4bed1b |

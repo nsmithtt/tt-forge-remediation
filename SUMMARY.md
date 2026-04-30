@@ -42,7 +42,9 @@ Two-layer failure:
 **Layer 2 (hardware-class):** After fixing the loader, the model loads and compiles, then fails at inference with an OOM. EdensFall-L3.3-70B loaded at bfloat16 requires approximately 140 GB of DRAM for weights alone (70B parameters × 2 bytes), while a single p150b device has ~32 GB of DRAM. The device is 95%+ allocated when inference begins, and the attempt to allocate one more 450 MB tensor for tilize fails.
 
 ## Fix
-**Loader fix** (`third_party/tt_forge_models` — 26 files): Updated `_patched_load_gguf_checkpoint(gguf_path, return_tensors=False)` → `_patched_load_gguf_checkpoint(gguf_path, return_tensors=False, model_to_load=None)` and forwarded `model_to_load` to the wrapped `_orig_load_gguf_checkpoint` call in all 26 loaders that had the limited signature.
+**Loader fix 1** (`third_party/tt_forge_models` — 26 files): Updated `_patched_load_gguf_checkpoint(gguf_path, return_tensors=False)` → `_patched_load_gguf_checkpoint(gguf_path, return_tensors=False, model_to_load=None)` and forwarded `model_to_load` to the wrapped `_orig_load_gguf_checkpoint` call in all 26 loaders that had the limited signature.
+
+**Loader fix 2** (`third_party/tt_forge_models/edensfall_l3_3_70b_0_1a_i1_gguf/causal_lm/pytorch/requirements.txt`): Added missing `requirements.txt` with `gguf>=0.10.0`. Without it, the test environment does not install `gguf`, and transformers raises `ImportError: Please install torch and gguf>=0.10.0 to load a GGUF checkpoint in PyTorch.` (the original CI failure).
 
 **XFAIL config** (`tests/runner/test_config/torch/test_config_inference_single_device.yaml`): Added `KNOWN_FAILURE_XFAIL` entry for this test explaining the hardware capacity limitation.
 
@@ -73,6 +75,7 @@ Files changed:
 - `third_party/tt_forge_models/tvall43_qwen3_5_2b_heretic_v3b_i1_gguf/causal_lm/pytorch/loader.py`
 - `third_party/tt_forge_models/tvall43_qwen3_5_4b_heretic_v2_i1_gguf/causal_lm/pytorch/loader.py`
 - `third_party/tt_forge_models/unified_reward_flex_qwen35_27b_gguf/causal_lm/pytorch/loader.py`
+- `third_party/tt_forge_models/edensfall_l3_3_70b_0_1a_i1_gguf/causal_lm/pytorch/requirements.txt` (new file)
 - `tests/runner/test_config/torch/test_config_inference_single_device.yaml` (XFAIL entry)
 
 ## Verification
@@ -83,6 +86,7 @@ Files changed:
 
 ## Files changed
 - `third_party/tt_forge_models/` — 26 loader.py files (model_to_load kwarg fix)
+- `third_party/tt_forge_models/edensfall_l3_3_70b_0_1a_i1_gguf/causal_lm/pytorch/requirements.txt` (new)
 - `tests/runner/test_config/torch/test_config_inference_single_device.yaml` (XFAIL)
 
 ## Submodule hashes
@@ -90,5 +94,5 @@ Files changed:
 |-----------------|--------|
 | tt-metal        | 3fa4d753550dba1d4aacc9af45b111ae540f63fc |
 | tt-mlir         | 553c0632b353f8ac457aba0d01a460a5e0f5b5ee |
-| tt-xla          | 145ecd860bedddb627e5981d355aa82e09d1daee |
-| tt-forge-models | 6349d2bcf92b94c75b94e6e6a0e4780193d563c0 |
+| tt-xla          | c8995585b49104d4214db7c35bc12d7f14a3d93f |
+| tt-forge-models | 28bbe650b63c4bc9160ccfb129d97574506b1306 |

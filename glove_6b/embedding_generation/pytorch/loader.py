@@ -7,7 +7,6 @@ GloVe-6B model loader implementation for word embedding generation.
 Uses the NeuML/glove-6B StaticVectors model which provides 300-dimensional
 GloVe word embeddings trained on 6 billion tokens.
 """
-import numpy as np
 import torch
 import torch.nn as nn
 from typing import Optional
@@ -31,19 +30,19 @@ class ModelVariant(StrEnum):
 
 
 class GloVeEmbeddingModel(nn.Module):
-    """PyTorch wrapper around StaticVectors GloVe embeddings."""
+    """PyTorch nn.Embedding wrapper around StaticVectors GloVe weights."""
 
-    def __init__(self, model_name: str):
+    def __init__(self, sv):
         super().__init__()
-        from staticvectors import StaticVectors
+        import numpy as np
 
-        self._sv = StaticVectors(model_name)
-        embedding_dim = 300
-        self._embedding_dim = embedding_dim
+        weights = torch.from_numpy(np.array(sv.vectors, dtype="float32"))
+        self.embedding = nn.Embedding.from_pretrained(weights, freeze=True)
 
-    def forward(self, input_texts: list[str]) -> torch.Tensor:
-        embeddings = self._sv.embeddings(input_texts)
-        return torch.tensor(np.array(embeddings), dtype=torch.float32)
+    def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
+        emb = self.embedding(token_ids)
+        norms = (emb * emb).sum(dim=-1, keepdim=True).sqrt().clamp(min=1e-12)
+        return emb / norms
 
 
 class ModelLoader(ForgeModel):
@@ -61,6 +60,7 @@ class ModelLoader(ForgeModel):
 
     def __init__(self, variant: Optional[ModelVariant] = None):
         super().__init__(variant)
+        self._sv = None
 
     @classmethod
     def _get_model_info(cls, variant: Optional[ModelVariant] = None) -> ModelInfo:
@@ -77,9 +77,26 @@ class ModelLoader(ForgeModel):
         )
 
     def load_model(self, *, dtype_override=None, **kwargs):
-        model = GloVeEmbeddingModel(self._variant_config.pretrained_model_name)
+        from staticvectors import StaticVectors
+
+        sv = StaticVectors(self._variant_config.pretrained_model_name)
+        self._sv = sv
+        model = GloVeEmbeddingModel(sv)
         model.eval()
+        if dtype_override is not None:
+            model = model.to(dtype_override)
         return model
 
     def load_inputs(self, dtype_override=None):
-        return self.sample_sentences
+        sv = self._sv
+        words = self.sample_sentences[0].split()
+        token_ids = []
+        for word in words:
+            word_lower = word.lower()
+            if word_lower in sv.tokens:
+                token_ids.append(sv.tokens[word_lower])
+            elif word in sv.tokens:
+                token_ids.append(sv.tokens[word])
+            else:
+                token_ids.append(0)
+        return torch.tensor([token_ids], dtype=torch.long)

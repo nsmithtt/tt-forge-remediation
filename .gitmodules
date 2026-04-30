@@ -1,6 +1,7 @@
 [submodule "tt-xla"]
 	path = tt-xla
 	url = git@github.com:tenstorrent/tt-xla.git
+	branch = remediation/glm_4_5_air_awq_fp16mix-causal_lm-pytorch-GLM_4_5_Air_AWQ_FP16Mix-single_device-inference
 [submodule "tt-mlir"]
 	path = tt-mlir
 	url = git@github.com:tenstorrent/tt-mlir.git

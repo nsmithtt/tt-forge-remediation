@@ -39,7 +39,7 @@ Two-layer failure:
 
 **Layer 1 (loader):** At pytest collection time, `TorchDynamicLoader.setup_test_discovery()` imports all loader.py files. Twenty-six GGUF loaders (qwen35, gpt-oss variants) patch `transformers.modeling_gguf_pytorch_utils.load_gguf_checkpoint` globally at import time with a function whose signature is `(gguf_path, return_tensors=False)`. Transformers 5.x added `model_to_load` as a third parameter, so when the edensfall test subsequently calls `AutoModelForCausalLM.from_pretrained(..., gguf_file=...)`, transformers calls `load_gguf_checkpoint(..., model_to_load=dummy_model)` — which fails with `TypeError` because the globally-installed patched function doesn't accept that keyword.
 
-**Layer 2 (hardware-class):** After fixing the loader, the model loads and compiles, then fails at inference with an OOM. EdensFall-L3.3-70B loaded at bfloat16 requires approximately 140 GB of DRAM for weights alone (70B parameters × 2 bytes), while a single n150 device has ~32 GB of DRAM. The device is 95%+ allocated when inference begins, and the attempt to allocate one more 450 MB tensor for tilize fails.
+**Layer 2 (hardware-class):** After fixing the loader, the model loads and compiles, then fails at inference with an OOM. EdensFall-L3.3-70B loaded at bfloat16 requires approximately 140 GB of DRAM for weights alone (70B parameters × 2 bytes), while a single p150b device has ~32 GB of DRAM. The device is 95%+ allocated when inference begins, and the attempt to allocate one more 450 MB tensor for tilize fails.
 
 ## Fix
 **Loader fix** (`third_party/tt_forge_models` — 26 files): Updated `_patched_load_gguf_checkpoint(gguf_path, return_tensors=False)` → `_patched_load_gguf_checkpoint(gguf_path, return_tensors=False, model_to_load=None)` and forwarded `model_to_load` to the wrapped `_orig_load_gguf_checkpoint` call in all 26 loaders that had the limited signature.
@@ -76,9 +76,9 @@ Files changed:
 - `tests/runner/test_config/torch/test_config_inference_single_device.yaml` (XFAIL entry)
 
 ## Verification
-- pytest exit: FAIL (OOM after loader fix; expected — hardware-class)
-- Hardware:    n150
-- Duration:    1581.81s (0:26:21)
+- pytest exit: XFAIL
+- Hardware:    blackhole-p150b
+- Duration:    921.53s (0:15:21)
 - Tier A attempts: N/A
 
 ## Files changed

@@ -55,7 +55,7 @@ Two issues in sequence:
 ## Verification
 - pytest exit: FAIL
 - Hardware:    blackhole-p150b
-- Duration:    695.23s (0:11:35) — first run; 701.49s second run
+- Duration:    695.23s (0:11:35) — first run; 701.49s second run; 684.30s third run
 - Tier A attempts: N/A
 
 ## Files changed

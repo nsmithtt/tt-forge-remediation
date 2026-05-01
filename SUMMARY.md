@@ -45,7 +45,9 @@ Two issues in sequence:
 **Compiler (unfixed):** After the loader fix, the model (Qwen2, 48 layers, hidden_size=5120, Q4_K_M GGUF) compiles and runs on BH p150b but produces PCC=0.9897 vs required 0.99. This is the known WH/BH BF16 matmul precision floor: large hidden dimensions accumulate rounding error across 48 transformer blocks, yielding a systematic deviation below the 0.99 threshold. Same root cause as `ttmlir-bf16-matmul-precision-floor` seen in BlackSheep-RP 12B (PCC=0.949) and other large dense models.
 
 ## Fix
-**Loader fix** (tt_forge_models `d83214f0b8`): Changed all 26 narrow-signature `_patched_load_gguf_checkpoint(gguf_path, return_tensors=False)` wrappers to `_patched_load_gguf_checkpoint(*args, **kwargs)` and forwarded args/kwargs to the original function. This allows `model_to_load` and any future kwargs from transformers to flow through without TypeError.
+**Loader fix — cross-loader contamination** (tt_forge_models `d83214f0b8`): Changed all 26 narrow-signature `_patched_load_gguf_checkpoint(gguf_path, return_tensors=False)` wrappers to `_patched_load_gguf_checkpoint(*args, **kwargs)` and forwarded args/kwargs to the original function. This allows `model_to_load` and any future kwargs from transformers to flow through without TypeError.
+
+**Loader fix — requirements.txt** (tt_forge_models `a381f9e753`): Added `gguf>=0.10.0` to `kairos_14b_v1_m4_robust_i1_gguf/causal_lm/pytorch/requirements.txt` to ensure the GGUF loader is available.
 
 **Compiler fix (proposed):** Increase matmul math fidelity from BF16 to F32 accumulation for large models on WH/BH silicon. This is a cross-cutting change across tt-mlir lowering passes and is infeasible as a targeted fix.
 
@@ -55,16 +57,17 @@ Two issues in sequence:
 ## Verification
 - pytest exit: FAIL
 - Hardware:    blackhole-p150b
-- Duration:    695.23s (0:11:35) — first run; 701.49s second run; 684.30s third run
+- Duration:    576.95s (0:09:36)
 - Tier A attempts: N/A
 
 ## Files changed
-- `tt_forge_models/dmind_3_mini_i1_gguf/causal_lm/pytorch/loader.py` (and 25 other qwen3.5/gpt-oss loaders) — `*args, **kwargs` fix in `_patched_load_gguf_checkpoint`
+- `kairos_14b_v1_m4_robust_i1_gguf/causal_lm/pytorch/requirements.txt` — new file, `gguf>=0.10.0`
+- `tt_forge_models/<26 loaders>/causal_lm/pytorch/loader.py` — `*args, **kwargs` fix in `_patched_load_gguf_checkpoint`
 
 ## Submodule hashes
 | Submodule       | Commit |
 |-----------------|--------|
 | tt-metal        | 3fa4d753550dba1d4aacc9af45b111ae540f63fc |
 | tt-mlir         | 553c0632b353f8ac457aba0d01a460a5e0f5b5ee |
-| tt-xla          | df09fb5a0322a89c7c64e82742bfc468afcaf2b9 |
-| tt-forge-models | d83214f0b8be2f4c0032f19628b19552c2068ed5 |
+| tt-xla          | 710ac8155a0f1a28a4e5e45979e5e8a7e2fa7a29 |
+| tt-forge-models | a381f9e753d1585a402402a592ba242ef2769178 |

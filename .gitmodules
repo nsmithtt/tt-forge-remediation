@@ -1,6 +1,7 @@
 [submodule "tt-xla"]
 	path = tt-xla
 	url = git@github.com:tenstorrent/tt-xla.git
+	branch = remediation/gutenocr_3b_i1_gguf-causal_lm-pytorch-gutenocr_3b_i1_GGUF-single_device-inference
 [submodule "tt-mlir"]
 	path = tt-mlir
 	url = git@github.com:tenstorrent/tt-mlir.git

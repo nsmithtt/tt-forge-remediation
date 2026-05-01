@@ -92,5 +92,5 @@ integer control-flow tensors. Neither is a scoped single-file change.
 |-----------------|--------|
 | tt-metal        | 3fa4d753550dba1d4aacc9af45b111ae540f63fc |
 | tt-mlir         | 553c0632b353f8ac457aba0d01a460a5e0f5b5ee |
-| tt-xla          | 94362e631171473c01993b3e216b6ae8ebb93ab8 |
+| tt-xla          | c3c21d5d6d42f701ce041062bfa69afb03f44e6d |
 | tt-forge-models | 10fe56fa0b3a2286cb7e3e4fffe0eb3d3362169e |

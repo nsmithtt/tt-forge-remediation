@@ -1,6 +1,7 @@
 [submodule "tt-xla"]
 	path = tt-xla
 	url = git@github.com:tenstorrent/tt-xla.git
+	branch = remediation/llama_3_1_nemotron_70b_instruct_hf_gguf-causal_lm-pytorch-Bartowski_3.1_Nemotron_70B_Instruct_HF_Q4_K_M-single_device-inference
 [submodule "tt-mlir"]
 	path = tt-mlir
 	url = git@github.com:tenstorrent/tt-mlir.git

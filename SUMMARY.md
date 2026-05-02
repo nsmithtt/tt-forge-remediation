@@ -36,6 +36,11 @@ TypeError: _patched_load_gguf_checkpoint() got an unexpected keyword argument 'm
 
 After fixing narrow-sig patches, secondary failure:
 ```
+ValueError: GGUF model with architecture qwen35 is not supported yet.
+```
+
+After adding qwen35 GGUF architecture registration (qwen35→qwen3 alias), terminal failure:
+```
 RuntimeError: You set `ignore_mismatched_sizes` to `False`, thus raising an error.
 
 model.layers.{0...62}.self_attn.k_norm.weight         | MISSING
@@ -72,6 +77,9 @@ def _patched_load_gguf_checkpoint(*args, **kwargs):
 ```
 Also added `requirements.txt` with `gguf>=0.10.0` to `mradermacher_qwen3_5_27b_engineer_deckard_gemini_i1_gguf/causal_lm/pytorch/`.
 
+**Bug 1b (fixed): missing qwen35 GGUF architecture registration.**
+After the narrow-sig fix, `AutoTokenizer.from_pretrained(..., gguf_file=...)` fails with `ValueError: GGUF model with architecture qwen35 is not supported yet.` because `qwen35` is not in `GGUF_SUPPORTED_ARCHITECTURES`. Fix: add `_patch_qwen35_support()` to this loader (same pattern as other qwen35 loaders) to register `qwen35` as an alias for `qwen3`. This unblocks the architecture lookup but exposes Bug 2 (the terminal Tier B failure).
+
 **Bug 2 (proposed):** The loader needs to either:
 - Use the HuggingFace `Qwen3_5ForCausalLM` class if/when one is added to transformers that supports `full_attention_interval`, GLA layers, and asymmetric Q head dims, OR
 - Load the model using custom GLA-aware code (similar to how `qwen35` pytorch models are handled) that can represent hybrid architectures
@@ -90,6 +98,7 @@ new-infrastructure: Loading Qwen3.5 hybrid GLA+attention architectures as `Qwen3
 ## Files changed
 In `tt_forge_models` remediation branch (`remediation/mradermacher_qwen3_5_27b_engineer_deckard_gemini_i1_gguf-causal_lm-pytorch-27B_Engineer_Deckard_Gemini_i1_GGUF-single_device-inference`):
 - `mradermacher_qwen3_5_27b_engineer_deckard_gemini_i1_gguf/causal_lm/pytorch/requirements.txt` (added, `gguf>=0.10.0`)
+- `mradermacher_qwen3_5_27b_engineer_deckard_gemini_i1_gguf/causal_lm/pytorch/loader.py` (qwen35 arch registration patch)
 - `bartowski_coniccat_qwen3_5_27b_writer_gguf/causal_lm/pytorch/loader.py` (narrow-sig fix)
 - `daniloreddy_qwen3_5_0_8b_gguf/causal_lm/pytorch/loader.py` (narrow-sig fix)
 - `dmind_3_mini_i1_gguf/causal_lm/pytorch/loader.py` (narrow-sig fix)
@@ -122,5 +131,5 @@ In `tt_forge_models` remediation branch (`remediation/mradermacher_qwen3_5_27b_e
 |-----------------|--------|
 | tt-metal        | 3fa4d753550dba1d4aacc9af45b111ae540f63fc |
 | tt-mlir         | 553c0632b353f8ac457aba0d01a460a5e0f5b5ee |
-| tt-xla          | 94362e631171473c01993b3e216b6ae8ebb93ab8 |
-| tt-forge-models | 9a23c0103da6f6854d8f3d575c3b6ae28d9c6589 (branch: remediation/mradermacher_qwen3_5_27b_engineer_deckard_gemini_i1_gguf-causal_lm-pytorch-27B_Engineer_Deckard_Gemini_i1_GGUF-single_device-inference) |
+| tt-xla          | bfb9c71752f00716a3f0352216ea3dad45a06cbd (branch: remediation/mradermacher_qwen3_5_27b_engineer_deckard_gemini_i1_gguf-causal_lm-pytorch-27B_Engineer_Deckard_Gemini_i1_GGUF-single_device-inference) |
+| tt-forge-models | fe97776b4ccb0260a4f1da6e94ce8ed3a2b7717a (branch: remediation/mradermacher_qwen3_5_27b_engineer_deckard_gemini_i1_gguf-causal_lm-pytorch-27B_Engineer_Deckard_Gemini_i1_GGUF-single_device-inference) |

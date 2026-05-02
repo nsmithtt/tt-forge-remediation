@@ -7,7 +7,7 @@
 tests/runner/test_models.py::test_all_models_torch[mlx_community_llama_4_scout_17b_16e_instruct_4bit/causal_lm/pytorch-Scout_17B_16E_Instruct_4bit-single_device-inference]
 
 ## Result
-XFAIL — Llama-4-Scout-17B-16E BF16 ~34 GB exceeds single-device DRAM on all supported hardware
+XFAIL — Llama-4-Scout-17B-16E has 107.8B total params (16 experts all stored); BF16 ~215 GB exceeds single-device DRAM on all supported hardware
 
 ## Stack layer
 loader, hardware-class
@@ -41,7 +41,7 @@ Two issues existed in the loader:
 
 2. **Forbidden workaround (removed):** The loader was overriding `num_hidden_layers=6, hidden_size=1024, num_attention_heads=16, ...` to make a tiny random-weight model fit on device. This masked the real hardware capacity issue.
 
-The full Llama-4-Scout-17B-16E model has 48 hidden layers, hidden_size=5120, 202048 vocab_size. At BF16: ~17B params × 2 bytes ≈ 34 GB — exceeding the 32 GB DRAM on p150b and the 12 GB DRAM on n150. This is hardware-class, not a compiler bug.
+The full Llama-4-Scout-17B-16E model has 48 hidden layers, hidden_size=5120, 202048 vocab_size. The "17B" naming refers to *active* parameters per token (1 of 16 experts active); all 16 expert weights are stored in memory. Verified via `from_config`: `num_params: 107,769,861,120` (≈107.8B). At BF16: 107.8B × 2 bytes ≈ 215.6 GB — massively exceeding the 32 GB DRAM on p150b and the 12 GB DRAM on n150. This is hardware-class, not a compiler bug.
 
 ## Fix
 
@@ -55,7 +55,7 @@ The full Llama-4-Scout-17B-16E model has 48 hidden layers, hidden_size=5120, 202
 - Updated `tt_forge_models` submodule pointer to the remediation branch commit.
 
 ## Verification
-- pytest exit: not-run (model instantiation requires ~34 GB RAM allocation; multiple concurrent runs exhausted system resources; XFAIL is analytically certain: 17B BF16 = 34 GB > 32 GB p150b DRAM)
+- pytest exit: not-run (model instantiation requires ~215 GB RAM; multiple concurrent runs exhausted system resources; XFAIL is confirmed: 107.8B total params verified via from_config, 107.8B × 2 bytes = 215.6 GB BF16 >> 32 GB p150b DRAM)
 - Hardware:    not-run
 - Duration:    N/A
 - Tier A attempts: N/A

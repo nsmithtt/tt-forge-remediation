@@ -89,5 +89,5 @@ cross-cutting — preserving f32 precision through every lowering pass requires 
 |-----------------|--------|
 | tt-metal        | 3fa4d753550dba1d4aacc9af45b111ae540f63fc |
 | tt-mlir         | 553c0632b353f8ac457aba0d01a460a5e0f5b5ee |
-| tt-xla          | c3490b08f88a8b3231aefb7c1a683a5cdfe83ae4 |
+| tt-xla          | aca706efc7df8f15e452b8438a64582b285dabe3 |
 | tt-forge-models | 5197d3d3cd44401ffa64b5fb13c1501930ee6bb2 |

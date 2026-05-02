@@ -1,6 +1,7 @@
 [submodule "tt-xla"]
 	path = tt-xla
 	url = git@github.com:tenstorrent/tt-xla.git
+	branch = remediation/kimi_k2_5_mlx-pytorch-Kimi-K2.5-MLX-3.6bit-single_device-inference
 [submodule "tt-mlir"]
 	path = tt-mlir
 	url = git@github.com:tenstorrent/tt-mlir.git

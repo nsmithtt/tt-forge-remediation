@@ -16,7 +16,7 @@ loader
 B
 
 ## Bug fingerprint
-qwen35-hybrid-gla-gguf-attention-dim-mismatch
+qwen35-hybrid-gguf-no-transformers-mapping
 
 ## Workaround self-check
 - Layer trimming: NO
